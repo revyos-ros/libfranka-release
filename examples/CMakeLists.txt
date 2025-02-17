@@ -7,11 +7,15 @@ list(INSERT CMAKE_MODULE_PATH 0 ${CMAKE_CURRENT_LIST_DIR}/../cmake)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+## Load dependencies
+include(FetchFMT)
+
 if(NOT FRANKA_IS_FOUND)
     find_package(Franka REQUIRED)
 endif()
 find_package(Eigen3 REQUIRED)
 find_package(Poco REQUIRED COMPONENTS Foundation)
+find_package(pinocchio REQUIRED)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -20,7 +24,7 @@ add_library(examples_common STATIC
   examples_common.cpp
 )
 
-target_link_libraries(examples_common PRIVATE Franka::Franka Eigen3::Eigen3)
+target_link_libraries(examples_common PUBLIC Franka::Franka Eigen3::Eigen3)
 target_include_directories(examples_common PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
@@ -55,10 +59,10 @@ foreach(example ${EXAMPLES})
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
   )
-  target_link_libraries(${example} Franka::Franka examples_common Eigen3::Eigen3)
+  target_link_libraries(${example} Franka::Franka examples_common Eigen3::Eigen3 pinocchio::pinocchio)
 endforeach()
 
-target_link_libraries(joint_impedance_control Threads::Threads)
+target_link_libraries(joint_impedance_control Threads::Threads pinocchio::pinocchio)
 target_link_libraries(motion_with_control Poco::Foundation)
 target_link_libraries(motion_with_control_external_control_loop Poco::Foundation)
 
@@ -67,3 +71,6 @@ install(TARGETS ${EXAMPLES}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+# Further examples
+add_subdirectory(utility_examples)

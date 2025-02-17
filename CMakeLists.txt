@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.4)
+cmake_minimum_required(VERSION 3.11)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-set(libfranka_VERSION 0.13.6)
+set(libfranka_VERSION 0.15.0)
 
 project(libfranka
   VERSION ${libfranka_VERSION}
@@ -25,6 +25,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Set a default build type if none was specified
+set(DEFAULT_BUILD_TYPE "Release")
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Setting build type to '${DEFAULT_BUILD_TYPE}' as none was specified.")
+  set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE
+    STRING "Choose the type of build." FORCE)
+  # Set the possible values of build type for cmake-gui
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+    "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
+
 if(MSVC)
   add_compile_options(/W0)
 else()
@@ -37,6 +49,7 @@ set(THIRDPARTY_SOURCES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty" CACHE PATH
 ## Dependencies
 find_package(Poco REQUIRED COMPONENTS Net Foundation)
 find_package(Eigen3 REQUIRED)
+find_package(pinocchio REQUIRED)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -59,6 +72,9 @@ if(BUILD_COVERAGE)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
 endif()
 
+## Load dependencies
+include(FetchFMT)
+
 ## Submodules
 add_subdirectory(common)
 
@@ -78,8 +94,6 @@ add_library(franka SHARED
   src/library_downloader.cpp
   src/library_loader.cpp
   src/load_calculations.cpp
-  src/log.cpp
-  src/logger.cpp
   src/lowpass_filter.cpp
   src/model.cpp
   src/model_library.cpp
@@ -90,6 +104,12 @@ add_library(franka SHARED
   src/robot_state.cpp
   src/vacuum_gripper.cpp
   src/vacuum_gripper_state.cpp
+  src/robot_model.cpp
+
+  src/logging/cout_logging_sink.cpp
+  src/logging/logger.cpp
+  src/logging/robot_state_log.cpp
+  src/logging/robot_state_logger.cpp
 )
 add_library(Franka::Franka ALIAS franka)
 
@@ -125,10 +145,12 @@ target_link_libraries(franka PRIVATE
   Poco::Net
   Eigen3::Eigen3
   Threads::Threads
+  pinocchio::pinocchio
 )
 
 target_link_libraries(franka PUBLIC
   libfranka-common
+  fmt::fmt
 )
 
 ## Installation
@@ -194,7 +216,7 @@ set(CPACK_SYSTEM_NAME ${CMAKE_HOST_SYSTEM_PROCESSOR})
 # Debian versions require a dash
 set(CPACK_DEBIAN_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}-1)
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Franka Robotics GmbH")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpoco-dev")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpoco-dev, libfmt-dev, libeigen3-dev")
 set(CPACK_DEBIAN_PACKAGE_CONFLICTS "ros-kinetic-libfranka, ros-melodic-libfranka, ros-noetic-libfranka, ros-foxy-libfranka, ros-humble-libfranka")
 include(CPack)
 
@@ -218,7 +240,7 @@ file(GLOB_RECURSE TIDY_IGNORED_FILES
   src/libfcimodels.h
 )
 
-find_program(CLANG_FORMAT_PROG clang-format-6.0 DOC "'clang-format' executable")
+find_program(CLANG_FORMAT_PROG clang-format DOC "'clang-format' executable")
 if(CLANG_FORMAT_PROG)
   add_custom_target(format
     COMMAND ${CLANG_FORMAT_PROG} -i ${SOURCES} ${HEADERS} ${TEST_FILES}
@@ -233,10 +255,10 @@ if(CLANG_FORMAT_PROG)
     VERBATIM
   )
 else(CLANG_FORMAT_PROG)
-  MESSAGE(WARNING "Could not find clang-format-6.0")
+  MESSAGE(WARNING "Could not find clang-format")
 endif()
 
-find_program(CLANG_TIDY_PROG clang-tidy-6.0 DOC "'clang-tidy' executable")
+find_program(CLANG_TIDY_PROG clang-tidy DOC "'clang-tidy' executable")
 if(CLANG_TIDY_PROG)
   # Build JSON string for clang-tidy's line filter
   set(TIDY_FILES ${SOURCES} ${HEADERS})
@@ -261,5 +283,5 @@ if(CLANG_TIDY_PROG)
     VERBATIM
   )
 else(CLANG_TIDY_PROG)
-  MESSAGE(WARNING "Could not find clang-tidy-6.0")
+  MESSAGE(WARNING "Could not find clang-tidy")
 endif()
