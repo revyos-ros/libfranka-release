@@ -24,8 +24,13 @@ pipeline {
         agent {
           dockerfile {
             filename ".ci/Dockerfile.${env.DISTRO}"
+            args '-e PATH=/opt/openrobots/bin:$PATH ' +
+                '-e PKG_CONFIG_PATH=/opt/openrobots/lib/pkgconfig:$PKG_CONFIG_PATH ' +
+                '-e LD_LIBRARY_PATH=/opt/openrobots/lib:$LD_LIBRARY_PATH ' +
+                '-e PYTHONPATH=/opt/openrobots/lib/python3.10/site-packages:$PYTHONPATH ' +
+                '-e CMAKE_PREFIX_PATH=/opt/openrobots:$CMAKE_PREFIX_PATH'
             reuseNode true
-          }
+         }
         }
         axes {
           axis {
@@ -175,8 +180,9 @@ pipeline {
               dir("build-release.${env.DISTRO}") {
                 catchError(buildResult: env.UNSTABLE, stageResult: env.UNSTABLE) {
                   sh 'cpack'
-                  fePublishDebian('*.deb', 'futuretech-common', "deb.distribution=${env.DISTRO};deb.component=main;deb.architecture=amd64")
+                  fePublishDebian('*.deb', 'fci', "deb.distribution=${env.DISTRO};deb.component=main;deb.architecture=amd64")
                   dir('doc') {
+                    sh 'mv docs/*/html/ html/'
                     sh 'tar cfz ../libfranka-docs.tar.gz html'
                   }
                   sh "rename -e 's/(.tar.gz|.deb)\$/-${env.DISTRO}\$1/' *.deb *.tar.gz"
