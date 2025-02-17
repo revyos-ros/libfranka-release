@@ -18,18 +18,32 @@
 
 #include <franka/exception.h>
 
+#include <research_interface/robot/service_types.h>
+
 namespace franka {
+
+constexpr std::chrono::milliseconds kTimeout{10};
 
 class Network {
  public:
   Network(const std::string& franka_address,
           uint16_t franka_port,
-          std::chrono::milliseconds tcp_timeout = std::chrono::seconds(60),
+          std::chrono::milliseconds tcp_timeout = std::chrono::seconds(1),
           std::chrono::milliseconds udp_timeout = std::chrono::seconds(1),
           std::tuple<bool, int, int, int> tcp_keepalive = std::make_tuple(true, 1, 3, 1));
   ~Network();
 
   uint16_t udpPort() const noexcept;
+
+  /**
+   * @brief Checks if the TCP socket is alive.
+   *
+   * This function determines whether the TCP socket is currently active and able to communicate.
+   * It is needed by the method Robot::Impl::cancelMotion().
+   *
+   * @return true if the TCP socket is alive, false otherwise.
+   */
+  bool isTcpSocketAlive() const noexcept;
 
   template <typename T>
   T udpBlockingReceive();
@@ -129,6 +143,7 @@ T Network::udpBlockingReceiveUnsafe() try {
 
   return *reinterpret_cast<T*>(buffer.data());
 } catch (const Poco::Exception& e) {
+  tcp_socket_.shutdown();
   using namespace std::string_literals;  // NOLINT(google-build-using-namespace)
   throw NetworkException("libfranka: UDP receive: "s + e.what());
 }
@@ -195,7 +210,13 @@ uint32_t Network::tcpSendRequest(TArgs&&... args) try {
                          sizeof(typename T::template Message<typename T::Request>)),
       typename T::Request(std::forward<TArgs>(args)...));
 
-  tcp_socket_.sendBytes(&message, sizeof(message));
+  // NOLINTNEXTLINE
+  if constexpr (std::is_same_v<T, research_interface::robot::GetRobotModel>) {
+    auto serialized_request = message.serialize();
+    tcp_socket_.sendBytes(serialized_request.data(), serialized_request.size());
+  } else {  // NOLINT(readability-misleading-indentation)
+    tcp_socket_.sendBytes(&message, sizeof(message));
+  }
 
   return message.header.command_id;
 } catch (const Poco::Exception& e) {
@@ -235,7 +256,7 @@ typename T::Response Network::tcpBlockingReceiveResponse(uint32_t command_id,
   decltype(received_responses_)::const_iterator it;
   do {
     lock.lock();
-    tcpReadFromBuffer<T>(10ms);
+    tcpReadFromBuffer<T>(kTimeout);
     it = received_responses_.find(command_id);
     lock.unlock();
     std::this_thread::yield();
@@ -256,6 +277,31 @@ typename T::Response Network::tcpBlockingReceiveResponse(uint32_t command_id,
 
   received_responses_.erase(it);
   return message.getInstance();
+}
+
+template <>
+inline research_interface::robot::GetRobotModel::Response
+Network::tcpBlockingReceiveResponse<research_interface::robot::GetRobotModel>(
+    uint32_t command_id,
+    std::vector<uint8_t>* /*vl_buffer*/) {
+  using namespace std::literals::chrono_literals;  // NOLINT(google-build-using-namespace)
+  std::unique_lock<std::mutex> lock(tcp_mutex_, std::defer_lock);
+  decltype(received_responses_)::const_iterator it;
+  do {
+    lock.lock();
+    tcpReadFromBuffer<research_interface::robot::GetRobotModel>(kTimeout);
+    it = received_responses_.find(command_id);
+    lock.unlock();
+    std::this_thread::yield();
+  } while (it == received_responses_.end());
+
+  auto get_robot_model =
+      research_interface::robot::GetRobotModel::Message<
+          research_interface::robot::GetRobotModel::Response>::deserialize(it->second)
+          .getInstance();
+
+  received_responses_.erase(it);
+  return get_robot_model;
 }
 
 template <typename T, uint16_t kLibraryVersion>
